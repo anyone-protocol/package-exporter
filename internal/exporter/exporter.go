@@ -113,8 +113,6 @@ func FromConfig(cfg *config.Config, logger log.Logger) (*Exporter, error) {
 			return nil, err
 		}
 
-		logger.Log("regexp", cfg.AccessLogRegexp)
-
 		fetchers = append(fetchers, fetcher.NewNginxAccessLogFetcher(
 			cfg.Name,
 			cfg.AccessLogPath,

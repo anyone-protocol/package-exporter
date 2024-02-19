@@ -39,7 +39,7 @@ func (f *nginxAccessLogFetcher) FetchCount(ctx context.Context) (int, error) {
 	}
 
 	for {
-		_, err := f.logReader.ReadString('\n')
+		line, err := f.logReader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				return f.downloadCounter, nil
@@ -48,7 +48,9 @@ func (f *nginxAccessLogFetcher) FetchCount(ctx context.Context) (int, error) {
 			return 0, err
 		}
 
-		f.downloadCounter++
+		if f.accessLogRegexp.MatchString(line) {
+			f.downloadCounter++
+		}
 	}
 }
 

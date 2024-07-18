@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ATOR-Development/downloads-exporter/internal/config"
+	"github.com/ATOR-Development/downloads-exporter/internal/counter"
 	"github.com/ATOR-Development/downloads-exporter/internal/fetcher"
 )
 
@@ -20,103 +21,114 @@ const (
 	fetchTimeout = time.Second * 3
 )
 
-var (
-	upDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "up"),
-		"Was the last downloads count fetch successful.",
-		[]string{"name"}, nil,
-	)
-	countDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "count"),
-		"How many times item was downloaded.",
-		[]string{"name"}, nil,
-	)
-	scrapeDurationSecondsDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "scrape_duration_seconds"),
-		"How many seconds it took to fetch downloads count.",
-		[]string{"name"}, nil,
-	)
-)
-
 type Exporter struct {
+	labels   []string
 	fetchers []fetcher.Fetcher
 	logger   log.Logger
+
+	upDesc                    *prometheus.Desc
+	countDesc                 *prometheus.Desc
+	scrapeDurationSecondsDesc *prometheus.Desc
 }
 
 func FromConfig(cfg *config.Config, logger log.Logger) (*Exporter, error) {
 	var fetchers []fetcher.Fetcher
-	for _, cfg := range cfg.Fetchers.DockerHub {
-		if len(cfg.Name) == 0 {
+	for _, c := range cfg.Fetchers.DockerHub {
+		if len(c.Name) == 0 {
 			return nil, errors.New("exporter: docker hub name cannot be empty")
 		}
 
-		if len(cfg.Owner) == 0 {
+		if len(c.Owner) == 0 {
 			return nil, errors.New("exporter: docker hub owner cannot be empty")
 		}
 
-		if len(cfg.Repo) == 0 {
+		if len(c.Repo) == 0 {
 			return nil, errors.New("exporter: docker hub repo cannot be empty")
 		}
 
 		fetchers = append(fetchers, fetcher.NewDockerhubPullsFetcher(
-			cfg.Name,
-			cfg.Owner,
-			cfg.Repo,
+			c.Name,
+			c.Owner,
+			c.Repo,
 		))
 	}
 
-	for _, cfg := range cfg.Fetchers.GithubReleases {
-		if len(cfg.Name) == 0 {
+	for _, c := range cfg.Fetchers.GithubReleases {
+		if len(c.Name) == 0 {
 			return nil, errors.New("exporter: github releases name cannot be empty")
 		}
 
-		if len(cfg.Owner) == 0 {
+		if len(c.Owner) == 0 {
 			return nil, errors.New("exporter: github releases owner cannot be empty")
 		}
 
-		if len(cfg.Repo) == 0 {
+		if len(c.Repo) == 0 {
 			return nil, errors.New("exporter: github releases repo cannot be empty")
 		}
 
 		var err error
 		var assetsRegexp *regexp.Regexp
-		if len(cfg.AssetsRegexp) > 0 {
-			assetsRegexp, err = regexp.Compile(cfg.AssetsRegexp)
+		if len(c.AssetsRegexp) > 0 {
+			assetsRegexp, err = regexp.Compile(c.AssetsRegexp)
 			if err != nil {
 				return nil, err
 			}
 		}
 
+		labels := make(map[string]*regexp.Regexp)
+		for labelName, labelRegexStr := range c.Labels {
+			labelRegex, err := regexp.Compile(labelRegexStr)
+			if err != nil {
+				return nil, err
+			}
+
+			labels[labelName] = labelRegex
+		}
+
 		fetchers = append(fetchers, fetcher.NewGithubReleasesFetcher(
-			cfg.Name,
-			cfg.Owner,
-			cfg.Repo,
+			c.Name,
+			c.Owner,
+			c.Repo,
 			assetsRegexp,
+			labels,
+			counter.New(cfg.Labels),
 		))
 	}
 
-	for _, cfg := range cfg.Fetchers.NginxAccessLogs {
-		if len(cfg.Name) == 0 {
+	for _, c := range cfg.Fetchers.NginxAccessLogs {
+		if len(c.Name) == 0 {
 			return nil, errors.New("exporter: nginx access log name cannot be empty")
 		}
 
-		if len(cfg.AccessLogPath) == 0 {
+		if len(c.AccessLogPath) == 0 {
 			return nil, errors.New("exporter: nginx access log path cannot be empty")
 		}
 
-		if len(cfg.AccessLogRegexp) == 0 {
+		if len(c.AccessLogRegexp) == 0 {
 			return nil, errors.New("exporter: nginx access log regexp cannot be empty")
 		}
 
-		accessLogRegexp, err := regexp.Compile(cfg.AccessLogRegexp)
+		accessLogRegexp, err := regexp.Compile(c.AccessLogRegexp)
 		if err != nil {
 			return nil, err
 		}
 
+		labels := make(map[string]*regexp.Regexp)
+		for labelName, labelRegexStr := range c.Labels {
+			labelRegex, err := regexp.Compile(labelRegexStr)
+			if err != nil {
+				return nil, err
+			}
+
+			labels[labelName] = labelRegex
+		}
+
 		fetchers = append(fetchers, fetcher.NewNginxAccessLogFetcher(
-			cfg.Name,
-			cfg.AccessLogPath,
+			c.Name,
+			c.AccessLogPath,
 			accessLogRegexp,
+			labels,
+			counter.New(cfg.Labels),
 		))
 	}
 
@@ -124,13 +136,45 @@ func FromConfig(cfg *config.Config, logger log.Logger) (*Exporter, error) {
 		return nil, errors.New("exporter: no configs specified")
 	}
 
-	return &Exporter{fetchers: fetchers, logger: logger}, nil
+	return &Exporter{
+		labels:   cfg.Labels,
+		fetchers: fetchers,
+		logger:   logger,
+
+		upDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "up"),
+			"Was the last downloads count fetch successful.",
+			[]string{"name"}, nil,
+		),
+		countDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "count"),
+			"How many times item was downloaded.",
+			append([]string{"name"}, cfg.Labels...), nil,
+		),
+		scrapeDurationSecondsDesc: prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, "", "scrape_duration_seconds"),
+			"How many seconds it took to fetch downloads count.",
+			[]string{"name"}, nil,
+		),
+	}, nil
 }
 
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	ch <- upDesc
-	ch <- countDesc
-	ch <- scrapeDurationSecondsDesc
+	ch <- prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "up"),
+		"Was the last downloads count fetch successful.",
+		[]string{"name"}, nil,
+	)
+	ch <- prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "count"),
+		"How many times item was downloaded.",
+		append([]string{"name"}, e.labels...), nil,
+	)
+	ch <- prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "scrape_duration_seconds"),
+		"How many seconds it took to fetch downloads count.",
+		[]string{"name"}, nil,
+	)
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
@@ -145,10 +189,10 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			defer cancel()
 
-			count, err := f.FetchCount(ctx)
+			results, err := f.FetchCount(ctx)
 			if err != nil {
 				ch <- prometheus.MustNewConstMetric(
-					upDesc, prometheus.GaugeValue, 0, f.Name(),
+					e.upDesc, prometheus.GaugeValue, 0, f.Name(),
 				)
 				level.Error(e.logger).Log("msg", "failed to fetch metric", "name", f.Name(), "err", err.Error())
 				return
@@ -157,11 +201,22 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 			scrapeDuration := time.Since(scrapeStart)
 			scrapeDurationSeconds := float64(scrapeDuration.Milliseconds()) / 1000
 
-			level.Info(e.logger).Log("msg", "fetched new metric", "name", f.Name(), "count", count, "scrape_duration", scrapeDuration)
+			ch <- prometheus.MustNewConstMetric(e.upDesc, prometheus.GaugeValue, 1, f.Name())
+			ch <- prometheus.MustNewConstMetric(e.scrapeDurationSecondsDesc, prometheus.GaugeValue, scrapeDurationSeconds, f.Name())
 
-			ch <- prometheus.MustNewConstMetric(upDesc, prometheus.GaugeValue, 1, f.Name())
-			ch <- prometheus.MustNewConstMetric(countDesc, prometheus.CounterValue, float64(count), f.Name())
-			ch <- prometheus.MustNewConstMetric(scrapeDurationSecondsDesc, prometheus.GaugeValue, scrapeDurationSeconds, f.Name())
+			for _, result := range results {
+				var labelValues []string = []string{f.Name()}
+				for _, labelName := range e.labels {
+					if value, ok := result.Labels[labelName]; ok {
+						labelValues = append(labelValues, value)
+					} else {
+						labelValues = append(labelValues, "unknown")
+					}
+				}
+
+				level.Info(e.logger).Log("msg", "fetched new metric", "name", f.Name(), "key", result.Key, "count", result.Count, "scrape_duration", scrapeDuration)
+				ch <- prometheus.MustNewConstMetric(e.countDesc, prometheus.CounterValue, float64(result.Count), labelValues...)
+			}
 		}(f)
 	}
 

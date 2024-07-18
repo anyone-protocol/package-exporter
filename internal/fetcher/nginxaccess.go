@@ -6,18 +6,21 @@ import (
 	"io"
 	"os"
 	"regexp"
+
+	"github.com/ATOR-Development/downloads-exporter/internal/counter"
 )
 
 // NewNginxAccessLogFetcher creates new Nginx access log downloads fetcher from config
-func NewNginxAccessLogFetcher(name, accessLogPath string, accessLogRegexp *regexp.Regexp) Fetcher {
+func NewNginxAccessLogFetcher(name, accessLogPath string, accessLogRegexp *regexp.Regexp, labels map[string]*regexp.Regexp, counter *counter.Counter) Fetcher {
 	return &nginxAccessLogFetcher{
 		name:            name,
 		accessLogPath:   accessLogPath,
 		accessLogRegexp: accessLogRegexp,
+		labels:          labels,
+		counter:         counter,
 
-		logFile:         nil,
-		logReader:       nil,
-		downloadCounter: 0,
+		logFile:   nil,
+		logReader: nil,
 	}
 }
 
@@ -25,31 +28,40 @@ type nginxAccessLogFetcher struct {
 	name            string
 	accessLogPath   string
 	accessLogRegexp *regexp.Regexp
+	labels          map[string]*regexp.Regexp
+	counter         *counter.Counter
 
-	logFile         *os.File
-	logReader       *bufio.Reader
-	downloadCounter int
+	logFile   *os.File
+	logReader *bufio.Reader
 }
 
 // FetchCount fetches download count from nginx access logs and returns it
-func (f *nginxAccessLogFetcher) FetchCount(ctx context.Context) (int, error) {
+func (f *nginxAccessLogFetcher) FetchCount(ctx context.Context) ([]*counter.Result, error) {
 	err := f.reopenLogFileIfNeeded()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	for {
 		line, err := f.logReader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				return f.downloadCounter, nil
+				return f.counter.Results(), nil
 			}
 
-			return 0, err
+			return nil, err
 		}
 
 		if f.accessLogRegexp.MatchString(line) {
-			f.downloadCounter++
+			labels := make(map[string]string)
+			for labelName, labelRegexp := range f.labels {
+				submatch := labelRegexp.FindStringSubmatch(line)
+				if len(submatch) >= 2 {
+					labels[labelName] = submatch[1]
+				}
+			}
+
+			f.counter.Increment(labels)
 		}
 	}
 }

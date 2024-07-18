@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/ATOR-Development/downloads-exporter/internal/counter"
 )
 
 // NewDockerhubPullsFetcher creates new Docker Hub pulls fetcher from config
@@ -24,7 +26,7 @@ type dockerhubPullsFetcher struct {
 }
 
 // FetchCount fetches pull count from docker hub repo API and returns it
-func (f *dockerhubPullsFetcher) FetchCount(ctx context.Context) (int, error) {
+func (f *dockerhubPullsFetcher) FetchCount(ctx context.Context) ([]*counter.Result, error) {
 	type dockerhubRepo struct {
 		PullCount int `json:"pull_count"`
 	}
@@ -32,30 +34,37 @@ func (f *dockerhubPullsFetcher) FetchCount(ctx context.Context) (int, error) {
 	url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories/%s", f.owner, f.repo)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	req = req.WithContext(ctx)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 
 	respData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	var dockerhubRepoResp dockerhubRepo
 	err = json.Unmarshal(respData, &dockerhubRepoResp)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return dockerhubRepoResp.PullCount, nil
+	var results []*counter.Result
+
+	results = append(results, &counter.Result{
+		Count:  dockerhubRepoResp.PullCount,
+		Labels: make(map[string]string),
+	})
+
+	return results, nil
 }
 
 func (f *dockerhubPullsFetcher) Name() string {

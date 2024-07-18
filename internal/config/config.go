@@ -17,6 +17,7 @@ const (
 )
 
 type Config struct {
+	Labels   []string       `yaml:"labels"`
 	Fetchers FetcherConfigs `yaml:"fetchers"`
 }
 
@@ -33,16 +34,18 @@ type DockerHubConfig struct {
 }
 
 type GitHubReleasesConfig struct {
-	Name         string `yaml:"name"`
-	Owner        string `yaml:"owner"`
-	Repo         string `yaml:"repo"`
-	AssetsRegexp string `yaml:"assets_regexp"`
+	Name         string            `yaml:"name"`
+	Owner        string            `yaml:"owner"`
+	Repo         string            `yaml:"repo"`
+	AssetsRegexp string            `yaml:"assets_regexp"`
+	Labels       map[string]string `yaml:"labels"`
 }
 
 type NginxAccessLogsConfig struct {
-	Name            string `yaml:"name"`
-	AccessLogPath   string `yaml:"access_log_path"`
-	AccessLogRegexp string `yaml:"access_log_regexp"`
+	Name            string            `yaml:"name"`
+	AccessLogPath   string            `yaml:"access_log_path"`
+	AccessLogRegexp string            `yaml:"access_log_regexp"`
+	Labels          map[string]string `yaml:"labels"`
 }
 
 // New creates new Config from config data

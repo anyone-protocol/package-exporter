@@ -12,8 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/ATOR-Development/downloads-exporter/internal/config"
-	"github.com/ATOR-Development/downloads-exporter/internal/exporter"
+	"github.com/anyone-protocol/package-exporter/internal/config"
+	"github.com/anyone-protocol/package-exporter/internal/exporter"
 )
 
 var (
